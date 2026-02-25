@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "type": "volume",
+      "name": "main.docsidekick.ingest",
+      "id": "main.docsidekick.ingest",
+      "created_at": "2026-02-25T18:40:57.574653+00:00",
+      "updated_at": "2026-02-25T18:40:57.574653+00:00"
+    },
+    {
+      "type": "volume",
+      "name": "main.docsidekick.docsidekick_notes",
+      "id": "main.docsidekick.docsidekick_notes",
+      "created_at": "2026-02-25T18:42:06.092334+00:00",
+      "updated_at": "2026-02-25T18:42:06.092334+00:00"
+    },
+    {
+      "type": "knowledge_assistant",
+      "name": "DocSideKick_Notes_KA",
+      "id": "c0654286-a602-47c6-ab6f-547395a8c415",
+      "created_at": "2026-02-25T18:45:15.553772+00:00",
+      "updated_at": "2026-02-25T18:45:15.553772+00:00"
+    },
+    {
+      "type": "genie_space",
+      "name": "DocSideKick Patients Genie",
+      "id": "01f1127a279c1236b0015238b22fcabd",
+      "created_at": "2026-02-25T18:45:29.120491+00:00",
+      "updated_at": "2026-02-25T18:45:29.120491+00:00"
+    },
+    {
+      "type": "multi_agent_supervisor",
+      "name": "DocSideKick_Supervisor",
+      "id": "e56166cd-d3f6-44bd-92ac-57169dddcc82",
+      "created_at": "2026-02-25T18:45:42.621443+00:00",
+      "updated_at": "2026-02-25T19:02:52.971065+00:00"
+    },
+    {
+      "type": "knowledge_assistant",
+      "name": "DocSideKick_Notes_KA_v2",
+      "id": "4bf8091e-e749-4536-a478-0e77fba77b7b",
+      "created_at": "2026-02-25T18:50:57.070005+00:00",
+      "updated_at": "2026-02-25T18:50:57.070005+00:00"
+    },
+    {
+      "type": "genie_space",
+      "name": "DocSideKick Patients+Notes Genie",
+      "id": "01f1127be62a11d999a0127de5eda17f",
+      "created_at": "2026-02-25T18:57:58.314976+00:00",
+      "updated_at": "2026-02-25T18:57:58.314976+00:00"
+    }
+  ]
+}
