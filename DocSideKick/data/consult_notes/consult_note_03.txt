@@ -1,0 +1,7 @@
+Consult Note ID: CN-003
+Patient ID: P007
+Summary: Sleep quality poor. Reports daytime fatigue and occasional palpitations. No acute chest pain.
+Assessment: HFpEF, likely multifactorial symptom burden.
+Plan: Adjust beta blocker timing, sleep hygiene counseling, monitor blood pressure.
+
+Compliance Statement: This note is fully synthetic and contains no real patient identifiers.

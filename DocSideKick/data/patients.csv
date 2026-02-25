@@ -1,0 +1,21 @@
+patient_id,age,sex,heart_condition,diagnosis,medication,last_visit_date
+P001,67,F,Yes,Congestive Heart Failure,Lisinopril,2026-01-12
+P002,54,M,No,Type 2 Diabetes,Metformin,2026-01-24
+P003,72,M,Yes,Coronary Artery Disease,Atorvastatin,2026-02-03
+P004,61,F,No,Asthma,Albuterol,2026-01-08
+P005,59,M,Yes,Atrial Fibrillation,Warfarin,2026-02-10
+P006,45,F,No,Hypertension,Amlodipine,2026-01-19
+P007,76,F,Yes,Heart Failure with Preserved EF,Metoprolol,2026-02-07
+P008,63,M,No,Chronic Kidney Disease,Losartan,2026-01-31
+P009,68,F,Yes,Ischemic Cardiomyopathy,Spironolactone,2026-02-14
+P010,52,M,No,Obstructive Sleep Apnea,CPAP,2026-01-27
+P011,70,M,Yes,Myocardial Ischemia,Clopidogrel,2026-02-05
+P012,49,F,No,Hypothyroidism,Levothyroxine,2026-01-15
+P013,65,F,Yes,Valvular Heart Disease,Furosemide,2026-02-11
+P014,58,M,No,GERD,Omeprazole,2026-01-20
+P015,73,M,Yes,Dilated Cardiomyopathy,Carvedilol,2026-02-08
+P016,47,F,No,Migraine,Sumatriptan,2026-01-16
+P017,66,M,Yes,Coronary Artery Disease,Aspirin,2026-02-12
+P018,60,F,No,Osteoarthritis,Naproxen,2026-01-29
+P019,71,F,Yes,Chronic Heart Failure,Sacubitril/Valsartan,2026-02-09
+P020,56,M,No,Hyperlipidemia,Rosuvastatin,2026-01-22

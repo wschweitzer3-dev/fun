@@ -1,0 +1,7 @@
+Consult Note ID: CN-005
+Patient ID: P019
+Summary: Reports increased exertional dyspnea and chronic fatigue, especially evenings. Mild orthopnea.
+Assessment: Chronic heart failure with symptomatic fatigue.
+Plan: Evaluate volume status, reinforce fluid management, consider medication titration.
+
+Compliance Statement: This note is fully synthetic and contains no real patient identifiers.

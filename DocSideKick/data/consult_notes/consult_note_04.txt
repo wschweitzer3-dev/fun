@@ -1,0 +1,7 @@
+Consult Note ID: CN-004
+Patient ID: P012
+Summary: Thyroid management follow-up. Energy improving, no current fatigue complaint. No cardiovascular symptoms.
+Assessment: Hypothyroidism improving on current dose.
+Plan: Continue levothyroxine, repeat TSH in 8 weeks.
+
+Compliance Statement: This note is fully synthetic and contains no real patient identifiers.

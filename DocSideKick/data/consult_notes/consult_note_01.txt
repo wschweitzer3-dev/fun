@@ -1,0 +1,7 @@
+Consult Note ID: CN-001
+Patient ID: P001
+Summary: Patient reports worsening exertional shortness of breath and intermittent fatigue over the past 2 weeks. Lower-extremity edema present.
+Assessment: Chronic heart failure symptom progression.
+Plan: Increase diuretic dose, sodium restriction counseling, follow-up in 10 days.
+
+Compliance Statement: This note is fully synthetic and contains no real patient identifiers.

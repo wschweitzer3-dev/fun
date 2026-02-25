@@ -1,0 +1,7 @@
+Consult Note ID: CN-002
+Patient ID: P003
+Summary: Episodes of chest tightness with stair climbing. Denies dizziness. Mentions persistent afternoon fatigue limiting activity.
+Assessment: Coronary artery disease with reduced exercise tolerance.
+Plan: Continue statin, order stress test, review in cardiology clinic.
+
+Compliance Statement: This note is fully synthetic and contains no real patient identifiers.
