@@ -14,6 +14,13 @@ DEFAULT_QUESTION = (
 DEFAULT_ENDPOINT = "mas-6fc6c65c-endpoint"
 
 
+def _base_url_from_config(cfg: Config) -> str:
+    host = (cfg.host or "").strip().rstrip("/")
+    if host.startswith("http://") or host.startswith("https://"):
+        return host
+    return f"https://{host}"
+
+
 def _extract_text(response_json: Dict[str, Any]) -> str:
     # Handles common chat/agent response envelopes.
     if isinstance(response_json, dict):
@@ -61,8 +68,9 @@ def _extract_text(response_json: Dict[str, Any]) -> str:
 def get_endpoint_status(endpoint_name: str) -> str:
     cfg = Config()
     headers = cfg.authenticate()
+    base_url = _base_url_from_config(cfg)
     resp = requests.get(
-        f"https://{cfg.host}/api/2.0/serving-endpoints/{endpoint_name}",
+        f"{base_url}/api/2.0/serving-endpoints/{endpoint_name}",
         headers=headers,
         timeout=30,
     )
@@ -82,6 +90,7 @@ def ask_supervisor(endpoint_name: str, question: str) -> str:
     cfg = Config()
     headers = cfg.authenticate()
     headers["Content-Type"] = "application/json"
+    base_url = _base_url_from_config(cfg)
 
     payload = {
         "input": [
@@ -91,7 +100,7 @@ def ask_supervisor(endpoint_name: str, question: str) -> str:
     }
 
     resp = requests.post(
-        f"https://{cfg.host}/serving-endpoints/{endpoint_name}/invocations",
+        f"{base_url}/serving-endpoints/{endpoint_name}/invocations",
         headers=headers,
         json=payload,
         timeout=120,
