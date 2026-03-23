@@ -10,6 +10,7 @@ import pandas as pd
 from pyspark.sql import functions as F
 
 # COMMAND ----------
+
 # Widgets for job/runtime configuration
 
 dbutils.widgets.text("top_n", "20")
@@ -150,6 +151,7 @@ T-Mobile
 OVERSIGHT_ACCOUNTS = [x.strip() for x in OVERSIGHT_ACCOUNTS_RAW.splitlines() if x.strip()]
 
 # COMMAND ----------
+
 # Base extraction and outputs for BOTH Strategic + Named tables
 
 def normalize_name(s: str) -> str:
@@ -214,9 +216,21 @@ def to_markdown_table(df: pd.DataFrame) -> str:
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
 
+
+def safe_filename(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", (s or "").strip()).strip("_")[:120] or "account"
+
+
+def filestore_web_link(dbfs_uri: str) -> str:
+    if dbfs_uri.startswith("dbfs:/FileStore/"):
+        return "/files/" + dbfs_uri.replace("dbfs:/FileStore/", "", 1)
+    return dbfs_uri
+
 run_date = RUN_DATE_INPUT if RUN_DATE_INPUT else date.today().isoformat()
 weekly_dir = f"{OUTPUT_BASE}/weekly"
 dbutils.fs.mkdirs(weekly_dir)
+charts_dir = f"{weekly_dir}/charts/{run_date}"
+dbutils.fs.mkdirs(charts_dir)
 
 sku_delta_cols = {
     "GPU Model Serving": "delta_gpu_model_serving_dollars",
@@ -233,6 +247,8 @@ sku_delta_cols = {
 }
 
 segment_exports = {}
+chart_link_map = {}
+strategic_open_uc = pd.DataFrame()
 for segment_focus in ["strategic", "named"]:
     segment_title = segment_focus.title()
     sql = f"""
@@ -449,9 +465,8 @@ for segment_focus in ["strategic", "named"]:
         spark.createDataFrame(export_df).display()
 
 # COMMAND ----------
-# Strategic top-10 growers/decliners daily consumption visualizations
 
-chart_link_map = {}
+# Strategic top-10 growers/decliners daily consumption visualizations
 
 try:
     import matplotlib.pyplot as plt
@@ -528,8 +543,6 @@ if plt is not None and "strategic" in segment_exports and not segment_exports["s
             color_map = {col: color_palette(i) for i, col in enumerate(dollar_cols)}
 
             print("Rendering daily stacked consumption visuals for top 10 Strategic growers and decliners...")
-            chart_dir = f"{weekly_dir}/charts/{run_date}"
-            dbutils.fs.mkdirs(chart_dir)
             for _, acc in viz_accounts.iterrows():
                 account_id = str(acc["account_id"])
                 account_name = acc["account_name"]
@@ -566,15 +579,24 @@ if plt is not None and "strategic" in segment_exports and not segment_exports["s
                 plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
                 plt.xticks(rotation=45)
                 plt.tight_layout()
-                safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", account_name)[:80]
-                local_chart = f"/tmp/{signal}_{safe_name}_{account_id}_{run_date}.png"
-                dbfs_chart = f"{chart_dir}/{signal}_{safe_name}_{account_id}.png"
-                plt.savefig(local_chart, dpi=150, bbox_inches="tight")
-                dbutils.fs.cp(f"file:{local_chart}", dbfs_chart, True)
-                chart_link_map[account_id] = dbfs_chart
+                chart_name = f"{safe_filename(signal)}_{safe_filename(account_name)}_{safe_filename(account_id)}.png"
+                chart_uri = f"{charts_dir}/{chart_name}"
+                chart_local = "/dbfs/" + chart_uri.replace("dbfs:/", "", 1)
+                os.makedirs(os.path.dirname(chart_local), exist_ok=True)
+                plt.savefig(chart_local, dpi=150, bbox_inches="tight")
+                chart_link_map[account_id] = filestore_web_link(chart_uri)
                 plt.show()
+                plt.close()
+
+for seg_key, seg_df in segment_exports.items():
+    if seg_df is None or seg_df.empty:
+        continue
+    seg_copy = seg_df.copy()
+    seg_copy["chart_link"] = seg_copy["account_id"].astype(str).map(chart_link_map).fillna("")
+    segment_exports[seg_key] = seg_copy
 
 # COMMAND ----------
+
 # Strategic Top 20 Accounts -> Open AI Use Cases table
 
 if "strategic" in segment_exports and not segment_exports["strategic"].empty:
@@ -687,6 +709,154 @@ else:
     print("Strategic top-20 use case table skipped: Strategic export is empty.")
 
 # COMMAND ----------
+
+# VP weekly report (Google Doc friendly markdown), segmented by BU+1
+
+def format_pct(x) -> str:
+    try:
+        return f"{float(x):+.2f}%"
+    except Exception:
+        return ""
+
+
+def format_money(x) -> str:
+    try:
+        return f"${float(x):,.2f}"
+    except Exception:
+        return ""
+
+
+def with_display_cols(df: pd.DataFrame, include_segment: bool = False) -> pd.DataFrame:
+    out = df.copy()
+    out["T28D Spend"] = out["total_t28d_spend"].apply(format_money)
+    out["PoP Growth"] = out["pop_growth_pct"].apply(format_pct)
+    out["BU+1"] = out["sales_subregion_level_1"]
+    out["Image"] = out["chart_link"].apply(lambda x: f"[chart]({x})" if str(x).strip() else "")
+    cols = ["account_name", "BU+1", "T28D Spend", "PoP Growth", "top_ai_sku", "driving_skus", "Image"]
+    rename_map = {
+        "account_name": "Account",
+        "top_ai_sku": "Top AI SKU",
+        "driving_skus": "Top SKU Drivers",
+    }
+    if include_segment:
+        out["segment_label"] = out["segment_focus"]
+        cols = ["account_name", "segment_label", "BU+1", "T28D Spend", "PoP Growth", "top_ai_sku", "driving_skus", "Image"]
+        rename_map["segment_label"] = "Segment"
+    return out[cols].rename(columns=rename_map)
+
+
+def append_bu_section(md_parts: list, title: str, df: pd.DataFrame, include_segment: bool = False):
+    md_parts.append(f"## {title}")
+    md_parts.append("")
+    if df.empty:
+        md_parts.append("No accounts matched.")
+        md_parts.append("")
+        return
+    view = with_display_cols(df, include_segment=include_segment)
+    for bu in sorted(view["BU+1"].dropna().astype(str).unique().tolist()):
+        bu_df = view[view["BU+1"] == bu].copy()
+        md_parts.append(f"### BU+1: {bu}")
+        md_parts.append("")
+        md_parts.append(to_markdown_table(bu_df))
+        md_parts.append("")
+
+
+strategic_export = segment_exports.get("strategic", pd.DataFrame())
+named_export = segment_exports.get("named", pd.DataFrame())
+all_signals_export = pd.concat([strategic_export, named_export], ignore_index=True) if (
+    not strategic_export.empty or not named_export.empty
+) else pd.DataFrame()
+
+strategic_top10_growers = (
+    strategic_export[strategic_export["signal_type"] == "grower"]
+    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False])
+    .drop_duplicates(subset=["account_id"], keep="first")
+    .head(10)
+    .copy()
+) if not strategic_export.empty else pd.DataFrame()
+strategic_top10_decliners = (
+    strategic_export[strategic_export["signal_type"] == "decliner"]
+    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False])
+    .drop_duplicates(subset=["account_id"], keep="first")
+    .head(10)
+    .copy()
+) if not strategic_export.empty else pd.DataFrame()
+
+focus_export = all_signals_export[all_signals_export["is_oversight_account"] == True].copy() if not all_signals_export.empty else pd.DataFrame()
+focus_top10_growers = (
+    focus_export[focus_export["signal_type"] == "grower"]
+    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False])
+    .drop_duplicates(subset=["account_id"], keep="first")
+    .head(10)
+    .copy()
+) if not focus_export.empty else pd.DataFrame()
+focus_top10_decliners = (
+    focus_export[focus_export["signal_type"] == "decliner"]
+    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False])
+    .drop_duplicates(subset=["account_id"], keep="first")
+    .head(10)
+    .copy()
+) if not focus_export.empty else pd.DataFrame()
+
+top10_strategic_grower_ids = set(
+    strategic_top10_growers["account_id"].astype(str).tolist()
+) if not strategic_top10_growers.empty else set()
+strategic_open_uc_top10 = strategic_open_uc[
+    strategic_open_uc["account_id"].astype(str).isin(top10_strategic_grower_ids)
+].copy() if not strategic_open_uc.empty else pd.DataFrame()
+
+vp_md = [
+    f"# Weekly AI Territory Report ({run_date})",
+    "",
+    "- Scope: Strategic + Named account signals in DNB, LATAM, CMEG, HLS, FINS, PS, MFG",
+    f"- Noise filter: T28D spend > {MIN_T28D_SPEND}",
+    "- Signal thresholds: Growers >= +10% PoP, Decliners <= -10% PoP",
+    "",
+]
+
+append_bu_section(vp_md, "Section 1: Target 50 Accounts - Top 10 Growers", focus_top10_growers, include_segment=True)
+append_bu_section(vp_md, "Section 1: Target 50 Accounts - Top 10 Decliners", focus_top10_decliners, include_segment=True)
+append_bu_section(vp_md, "Section 2: Strategic Accounts - Top 10 Growers", strategic_top10_growers, include_segment=False)
+append_bu_section(vp_md, "Section 2: Strategic Accounts - Top 10 Decliners", strategic_top10_decliners, include_segment=False)
+
+vp_md.append("## Section 3: Open Use Cases for Top 10 Strategic Growers")
+vp_md.append("")
+if strategic_open_uc_top10.empty:
+    vp_md.append("No open AI/GenAI use cases found for this run.")
+    vp_md.append("")
+else:
+    uc_view = strategic_open_uc_top10.copy()
+    uc_view["T28D Spend"] = uc_view["total_t28d_spend"].apply(format_money)
+    uc_view["PoP Growth"] = uc_view["pop_growth_pct"].apply(format_pct)
+    uc_view["Est Monthly DBU $"] = uc_view["estimated_monthly_dollar_dbus"].apply(format_money)
+    uc_cols = [
+        "account_name",
+        "signal_type",
+        "T28D Spend",
+        "PoP Growth",
+        "top_ai_sku",
+        "usecase_name",
+        "stage",
+        "Est Monthly DBU $",
+    ]
+    uc_view = uc_view[uc_cols].rename(
+        columns={
+            "account_name": "Account",
+            "signal_type": "Signal",
+            "top_ai_sku": "Top AI SKU",
+            "usecase_name": "Open Use Case",
+            "stage": "UCO Stage",
+        }
+    )
+    vp_md.append(to_markdown_table(uc_view))
+    vp_md.append("")
+
+vp_report_uri = f"{weekly_dir}/vp_weekly_report_{run_date}.md"
+dbutils.fs.put(vp_report_uri, "\n".join(vp_md).strip() + "\n", True)
+print(f"Wrote VP Weekly Report MD: {vp_report_uri}")
+
+# COMMAND ----------
+
 # Oversight output for a fixed account subset (T7D + T28D side-by-side)
 
 def sql_quote_lower(s: str) -> str:
