@@ -307,25 +307,40 @@ def create_or_update_genie(
         params={"question_type": "SAMPLE_QUESTION"},
     ).get("curated_questions", [])
 
-    actions = []
+    existing_ids: List[str] = []
     for q in existing_questions:
-        qid = q.get("curated_question_id") or q.get("id")
-        if qid:
-            actions.append({"action_type": "DELETE", "curated_question_id": qid})
+        qid = q.get("curated_question_id") or q.get("id") or q.get("question_id")
+        if isinstance(qid, str) and qid.strip():
+            existing_ids.append(qid)
+
+    # Delete current sample questions first. Keep best-effort behavior so reruns are resilient.
+    if existing_ids:
+        delete_actions = [{"action_type": "DELETE", "curated_question_id": qid} for qid in existing_ids]
+        try:
+            _api_post(
+                f"/api/2.0/data-rooms/{space_id}/curated-questions/batch-actions",
+                {"actions": delete_actions},
+            )
+        except Exception as e:
+            print(
+                "Warning: sample-question delete via batch-actions failed; continuing with create. "
+                f"Details: {e}"
+            )
+
+    # Create desired sample questions one-by-one using curated-question create endpoint.
     for text in sample_questions:
-        actions.append(
+        _api_post(
+            f"/api/2.0/data-rooms/{space_id}/curated-questions",
             {
-                "action_type": "CREATE",
                 "curated_question": {
-                    "data_room_id": space_id,
+                    "data_space_id": space_id,
                     "question_text": text,
                     "question_type": "SAMPLE_QUESTION",
+                    "is_deprecated": False,
                 },
-            }
+                "data_space_id": space_id,
+            },
         )
-
-    if actions:
-        _api_post(f"/api/2.0/data-rooms/{space_id}/curated-questions/batch-actions", {"actions": actions})
 
     return {"space_id": space_id, "operation": operation, "display_name": display_name}
 
@@ -350,17 +365,30 @@ def create_or_update_ka(
     if existing:
         tile_id = existing["tile_id"]
         current = _api_get(f"/api/2.0/knowledge-assistants/{tile_id}")
-        current_sources = current.get("knowledge_assistant", {}).get("knowledge_sources", [])
-        remove_ids = [s.get("knowledge_source_id") for s in current_sources if s.get("knowledge_source_id")]
-        patch_payload = {
-            "name": safe_name,
-            "description": description,
-            "instructions": instructions,
-            "add_knowledge_sources": [source],
-            "remove_knowledge_source_ids": remove_ids,
-        }
-        result = _api_patch(f"/api/2.0/knowledge-assistants/{tile_id}", patch_payload)
-        operation = "updated"
+        ka_obj = current.get("knowledge_assistant", {})
+        current_sources = ka_obj.get("knowledge_sources", [])
+
+        existing_source_paths = set()
+        for s in current_sources:
+            files_path = (
+                s.get("files_source", {})
+                .get("files", {})
+                .get("path")
+            )
+            if files_path:
+                existing_source_paths.add(files_path)
+
+        # Some workspaces do not expose PATCH for KA. Reuse existing KA on rerun.
+        if volume_path not in existing_source_paths:
+            print(
+                "Warning: existing KA does not include requested volume path. "
+                "This workspace does not support KA PATCH in this notebook path, so reusing existing KA as-is."
+            )
+        if ka_obj.get("instructions") != instructions or ka_obj.get("description") != description:
+            print("Info: existing KA metadata differs from notebook config; reusing existing KA as-is.")
+
+        result = current
+        operation = "reused"
     else:
         result = _api_post(
             "/api/2.0/knowledge-assistants",
@@ -377,14 +405,26 @@ def create_or_update_ka(
     if not tile_id:
         tile_id = result.get("knowledge_assistant", {}).get("tile", {}).get("tile_id")
 
-    ready = _wait_for_status(
-        lambda: _api_get(f"/api/2.0/knowledge-assistants/{tile_id}"),
-        ("knowledge_assistant", "status", "endpoint_status"),
-        ready_values=("ONLINE",),
-        timeout_s=1200,
-        poll_s=15.0,
-    )
-    status = ready.get("knowledge_assistant", {}).get("status", {}).get("endpoint_status")
+    current_state = _api_get(f"/api/2.0/knowledge-assistants/{tile_id}")
+    status = current_state.get("knowledge_assistant", {}).get("status", {}).get("endpoint_status")
+
+    if status != "ONLINE":
+        try:
+            ready = _wait_for_status(
+                lambda: _api_get(f"/api/2.0/knowledge-assistants/{tile_id}"),
+                ("knowledge_assistant", "status", "endpoint_status"),
+                ready_values=("ONLINE",),
+                timeout_s=3600,
+                poll_s=20.0,
+            )
+            status = ready.get("knowledge_assistant", {}).get("status", {}).get("endpoint_status")
+        except TimeoutError:
+            latest = _api_get(f"/api/2.0/knowledge-assistants/{tile_id}")
+            status = latest.get("knowledge_assistant", {}).get("status", {}).get("endpoint_status")
+            print(
+                "Warning: KA endpoint did not reach ONLINE within timeout. "
+                f"Current status={status}. You can rerun Section 10 later."
+            )
 
     return {
         "tile_id": tile_id,
@@ -423,17 +463,29 @@ def create_or_update_mas(
 
     if existing:
         tile_id = existing["tile_id"]
-        result = _api_patch(
-            f"/api/2.0/multi-agent-supervisors/{tile_id}",
-            {
-                "tile_id": tile_id,
-                "name": safe_name,
-                "description": description,
-                "instructions": instructions,
-                "agents": agents,
-            },
-        )
-        operation = "updated"
+        try:
+            result = _api_patch(
+                f"/api/2.0/multi-agent-supervisors/{tile_id}",
+                {
+                    "tile_id": tile_id,
+                    "name": safe_name,
+                    "description": description,
+                    "instructions": instructions,
+                    "agents": agents,
+                },
+            )
+            operation = "updated"
+        except RuntimeError as e:
+            msg = str(e)
+            if "ENDPOINT_NOT_FOUND" in msg:
+                print(
+                    "Warning: MAS PATCH endpoint not available in this workspace. "
+                    "Reusing existing MAS as-is."
+                )
+                result = _api_get(f"/api/2.0/multi-agent-supervisors/{tile_id}")
+                operation = "reused"
+            else:
+                raise
     else:
         result = _api_post(
             "/api/2.0/multi-agent-supervisors",
@@ -460,14 +512,26 @@ def create_or_update_mas(
             # Example creation can race with provisioning; keep demo resilient.
             pass
 
-    ready = _wait_for_status(
-        lambda: _api_get(f"/api/2.0/multi-agent-supervisors/{tile_id}"),
-        ("multi_agent_supervisor", "status", "endpoint_status"),
-        ready_values=("ONLINE",),
-        timeout_s=1200,
-        poll_s=15.0,
-    )
-    status = ready.get("multi_agent_supervisor", {}).get("status", {}).get("endpoint_status")
+    current_state = _api_get(f"/api/2.0/multi-agent-supervisors/{tile_id}")
+    status = current_state.get("multi_agent_supervisor", {}).get("status", {}).get("endpoint_status")
+
+    if status != "ONLINE":
+        try:
+            ready = _wait_for_status(
+                lambda: _api_get(f"/api/2.0/multi-agent-supervisors/{tile_id}"),
+                ("multi_agent_supervisor", "status", "endpoint_status"),
+                ready_values=("ONLINE",),
+                timeout_s=3600,
+                poll_s=20.0,
+            )
+            status = ready.get("multi_agent_supervisor", {}).get("status", {}).get("endpoint_status")
+        except TimeoutError:
+            latest = _api_get(f"/api/2.0/multi-agent-supervisors/{tile_id}")
+            status = latest.get("multi_agent_supervisor", {}).get("status", {}).get("endpoint_status")
+            print(
+                "Warning: MAS endpoint did not reach ONLINE within timeout. "
+                f"Current status={status}. You can rerun Section 10 later."
+            )
 
     return {
         "tile_id": tile_id,
@@ -484,6 +548,31 @@ def pick_embedding_endpoint() -> str:
         if candidate in serving_eps:
             return candidate
     raise RuntimeError(f"No supported embedding endpoint found. Tried: {TARGET_EMBEDDING_ENDPOINTS}")
+
+
+def build_embedding_source_column(name: str, endpoint_name: str) -> EmbeddingSourceColumn:
+    """
+    Build EmbeddingSourceColumn compatibly across Databricks SDK versions.
+
+    Some runtimes expose `embedding_model_endpoint_name`; older ones may expose
+    `model_endpoint_name` (or only query-specific endpoint fields).
+    """
+    field_names = set(getattr(EmbeddingSourceColumn, "__dataclass_fields__", {}).keys())
+    payload: Dict[str, Any] = {"name": name}
+
+    if "embedding_model_endpoint_name" in field_names:
+        payload["embedding_model_endpoint_name"] = endpoint_name
+    elif "model_endpoint_name" in field_names:
+        payload["model_endpoint_name"] = endpoint_name
+    elif "model_endpoint_name_for_query" in field_names:
+        payload["model_endpoint_name_for_query"] = endpoint_name
+    else:
+        raise RuntimeError(
+            f"Unsupported EmbeddingSourceColumn fields {sorted(field_names)}; "
+            "cannot infer embedding endpoint argument."
+        )
+
+    return EmbeddingSourceColumn(**payload)
 
 
 def chunk_text(text: str, max_len: int = 900, overlap: int = 150) -> List[str]:
@@ -1001,9 +1090,9 @@ if VS_INDEX_NAME not in existing_indexes:
             source_table=CHUNKS_TABLE,
             pipeline_type=PipelineType.TRIGGERED,
             embedding_source_columns=[
-                EmbeddingSourceColumn(
+                build_embedding_source_column(
                     name="chunk_text",
-                    embedding_model_endpoint_name=embedding_endpoint,
+                    endpoint_name=embedding_endpoint,
                 )
             ],
             columns_to_sync=["chunk_id", "doc_id", "member_id", "doc_type", "chunk_text", "chunk_seq"],
@@ -1201,3 +1290,27 @@ OBJECTS CREATED
 - Supervisor: {MAS_NAME} ({mas_info['tile_id']})
 """
 )
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 13) Optional practice section (intentionally fails)
+# MAGIC
+# MAGIC This section is **not required** for the main demo build.
+# MAGIC It intentionally contains one easy-to-fix bug so Genie Code can repair it in one pass.
+
+# COMMAND ----------
+
+broken_practice_query = f"""
+SELECT
+  member_id,
+  risk_scor,
+  plan_type
+FROM {MEMBERS_TABLE}
+WHERE risk_scor >= 2.5
+ORDER BY risk_scor DESC
+LIMIT 10
+"""
+
+print("Running optional practice query (expected to fail)...")
+display(spark.sql(broken_practice_query))

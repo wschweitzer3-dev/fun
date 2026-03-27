@@ -3,7 +3,6 @@
 
 from datetime import date
 from difflib import SequenceMatcher
-import os
 import re
 
 import pandas as pd
@@ -33,8 +32,13 @@ SEGMENT_FOCUS_TITLE = SEGMENT_FOCUS.title()
 
 if RUN_DATE_INPUT:
     RUN_DATE_EXPR = f"DATE('{RUN_DATE_INPUT}')"
+    RUN_DATE_EFFECTIVE = RUN_DATE_INPUT
 else:
-    RUN_DATE_EXPR = "current_date()"
+    _max_usage_date = spark.sql(
+        "SELECT CAST(MAX(usage_date) AS STRING) AS max_usage_date FROM main.gtm_gold.account_consumption_daily"
+    ).collect()[0]["max_usage_date"]
+    RUN_DATE_EFFECTIVE = _max_usage_date if _max_usage_date else date.today().isoformat()
+    RUN_DATE_EXPR = f"DATE('{RUN_DATE_EFFECTIVE}')"
 
 OVERSIGHT_ACCOUNTS_RAW = """
 Abbott Laboratories
@@ -216,21 +220,9 @@ def to_markdown_table(df: pd.DataFrame) -> str:
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
 
-
-def safe_filename(s: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", (s or "").strip()).strip("_")[:120] or "account"
-
-
-def filestore_web_link(dbfs_uri: str) -> str:
-    if dbfs_uri.startswith("dbfs:/FileStore/"):
-        return "/files/" + dbfs_uri.replace("dbfs:/FileStore/", "", 1)
-    return dbfs_uri
-
 run_date = RUN_DATE_INPUT if RUN_DATE_INPUT else date.today().isoformat()
 weekly_dir = f"{OUTPUT_BASE}/weekly"
 dbutils.fs.mkdirs(weekly_dir)
-charts_dir = f"{weekly_dir}/charts/{run_date}"
-dbutils.fs.mkdirs(charts_dir)
 
 sku_delta_cols = {
     "GPU Model Serving": "delta_gpu_model_serving_dollars",
@@ -247,8 +239,6 @@ sku_delta_cols = {
 }
 
 segment_exports = {}
-chart_link_map = {}
-strategic_open_uc = pd.DataFrame()
 for segment_focus in ["strategic", "named"]:
     segment_title = segment_focus.title()
     sql = f"""
@@ -345,17 +335,24 @@ for segment_focus in ["strategic", "named"]:
         AND a.sales_subregion_level_1 IN ('DNB','LATAM','CMEG','HLS','FINS','PS','MFG')
     )
     SELECT * FROM joined
-    WHERE total_t28d_spend > {MIN_T28D_SPEND}
-      AND (pop_growth_pct >= 10 OR pop_growth_pct <= -10)
     """
     pdf = spark.sql(sql).toPandas()
+    total_rows = len(pdf)
+    spend_rows = int((pdf["total_t28d_spend"] > MIN_T28D_SPEND).sum()) if "total_t28d_spend" in pdf.columns else 0
+    grow_rows = int(((pdf["total_t28d_spend"] > MIN_T28D_SPEND) & (pdf["pop_growth_pct"] >= 10)).sum()) if not pdf.empty else 0
+    decline_rows = int(((pdf["total_t28d_spend"] > MIN_T28D_SPEND) & (pdf["pop_growth_pct"] <= -10)).sum()) if not pdf.empty else 0
+    print(
+        f"[{segment_title}] run_date={RUN_DATE_EFFECTIVE} | joined_rows={total_rows} | "
+        f"spend>{MIN_T28D_SPEND} rows={spend_rows} | growers(>=10%)={grow_rows} | decliners(<=-10%)={decline_rows}"
+    )
     for _, col in sku_delta_cols.items():
         if col not in pdf.columns:
             pdf[col] = 0.0
 
-    growers = pdf[pdf["pop_growth_pct"] >= 10].sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False]).head(TOP_N).copy()
+    pdf_filtered = pdf[pdf["total_t28d_spend"] > MIN_T28D_SPEND].copy()
+    growers = pdf_filtered[pdf_filtered["pop_growth_pct"] >= 10].sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False]).head(TOP_N).copy()
     growers["signal_type"] = "grower"
-    decliners = pdf[pdf["pop_growth_pct"] <= -10].sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False]).head(TOP_N).copy()
+    decliners = pdf_filtered[pdf_filtered["pop_growth_pct"] <= -10].sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False]).head(TOP_N).copy()
     decliners["signal_type"] = "decliner"
     result = pd.concat([growers, decliners], ignore_index=True)
     if not result.empty:
@@ -364,6 +361,9 @@ for segment_focus in ["strategic", "named"]:
             result[result["signal_type"] == "decliner"]["pop_growth_pct"].rank(method="first", ascending=True)
         )
         result["rank_within_signal"] = result["rank_within_signal"].astype(int)
+        result[["oversight_requested_account", "oversight_match_score", "is_oversight_account"]] = result.apply(
+            lambda r: pd.Series(best_requested_match(r.get("account_name"))), axis=1
+        )
     else:
         result["rank_within_signal"] = pd.Series(dtype=int)
         result["oversight_requested_account"] = pd.Series(dtype=str)
@@ -392,9 +392,6 @@ for segment_focus in ["strategic", "named"]:
         result["top_ai_sku_direction"] = pd.Series(dtype=str)
         result["driving_skus"] = pd.Series(dtype=str)
     else:
-        result[["oversight_requested_account", "oversight_match_score", "is_oversight_account"]] = result.apply(
-            lambda r: pd.Series(best_requested_match(r.get("account_name"))), axis=1
-        )
         result[["top_ai_sku", "top_ai_sku_delta", "top_ai_sku_direction", "driving_skus"]] = result.apply(sku_drivers, axis=1)
 
     def first_name(full_name: str) -> str:
@@ -587,21 +584,7 @@ if plt is not None and "strategic" in segment_exports and not segment_exports["s
                 plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
                 plt.xticks(rotation=45)
                 plt.tight_layout()
-                chart_name = f"{safe_filename(signal)}_{safe_filename(account_name)}_{safe_filename(account_id)}.png"
-                chart_uri = f"{charts_dir}/{chart_name}"
-                chart_local = "/dbfs/" + chart_uri.replace("dbfs:/", "", 1)
-                os.makedirs(os.path.dirname(chart_local), exist_ok=True)
-                plt.savefig(chart_local, dpi=150, bbox_inches="tight")
-                chart_link_map[account_id] = filestore_web_link(chart_uri)
                 plt.show()
-                plt.close()
-
-for seg_key, seg_df in segment_exports.items():
-    if seg_df is None or seg_df.empty:
-        continue
-    seg_copy = seg_df.copy()
-    seg_copy["chart_link"] = seg_copy["account_id"].astype(str).map(chart_link_map).fillna("")
-    segment_exports[seg_key] = seg_copy
 
 # COMMAND ----------
 
@@ -718,56 +701,7 @@ else:
 
 # COMMAND ----------
 
-# VP weekly report (Google Doc friendly markdown), segmented by BU+1
-
-def format_pct(x) -> str:
-    try:
-        return f"{float(x):+.2f}%"
-    except Exception:
-        return ""
-
-
-def format_money(x) -> str:
-    try:
-        return f"${float(x):,.2f}"
-    except Exception:
-        return ""
-
-
-def with_display_cols(df: pd.DataFrame, include_segment: bool = False) -> pd.DataFrame:
-    out = df.copy()
-    out["T28D Spend"] = out["total_t28d_spend"].apply(format_money)
-    out["PoP Growth"] = out["pop_growth_pct"].apply(format_pct)
-    out["BU+1"] = out["sales_subregion_level_1"]
-    out["Image"] = out["chart_link"].apply(lambda x: f"[chart]({x})" if str(x).strip() else "")
-    cols = ["account_name", "BU+1", "T28D Spend", "PoP Growth", "top_ai_sku", "driving_skus", "Image"]
-    rename_map = {
-        "account_name": "Account",
-        "top_ai_sku": "Top AI SKU",
-        "driving_skus": "Top SKU Drivers",
-    }
-    if include_segment:
-        out["segment_label"] = out["segment_focus"]
-        cols = ["account_name", "segment_label", "BU+1", "T28D Spend", "PoP Growth", "top_ai_sku", "driving_skus", "Image"]
-        rename_map["segment_label"] = "Segment"
-    return out[cols].rename(columns=rename_map)
-
-
-def append_bu_section(md_parts: list, title: str, df: pd.DataFrame, include_segment: bool = False):
-    md_parts.append(f"## {title}")
-    md_parts.append("")
-    if df.empty:
-        md_parts.append("No accounts matched.")
-        md_parts.append("")
-        return
-    view = with_display_cols(df, include_segment=include_segment)
-    for bu in sorted(view["BU+1"].dropna().astype(str).unique().tolist()):
-        bu_df = view[view["BU+1"] == bu].copy()
-        md_parts.append(f"### BU+1: {bu}")
-        md_parts.append("")
-        md_parts.append(to_markdown_table(bu_df))
-        md_parts.append("")
-
+# Territory at a glance (Focus Accounts): Top 10 increasers + decliners
 
 strategic_export = segment_exports.get("strategic", pd.DataFrame())
 named_export = segment_exports.get("named", pd.DataFrame())
@@ -775,93 +709,120 @@ all_signals_export = pd.concat([strategic_export, named_export], ignore_index=Tr
     not strategic_export.empty or not named_export.empty
 ) else pd.DataFrame()
 
-strategic_top10_growers = (
-    strategic_export[strategic_export["signal_type"] == "grower"]
-    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False])
-    .drop_duplicates(subset=["account_id"], keep="first")
-    .head(10)
-    .copy()
-) if not strategic_export.empty else pd.DataFrame()
-strategic_top10_decliners = (
-    strategic_export[strategic_export["signal_type"] == "decliner"]
-    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False])
-    .drop_duplicates(subset=["account_id"], keep="first")
-    .head(10)
-    .copy()
-) if not strategic_export.empty else pd.DataFrame()
+if not all_signals_export.empty:
+    db700 = all_signals_export[
+        (all_signals_export["is_oversight_account"] == True)
+    ].copy()
+else:
+    db700 = pd.DataFrame()
 
-focus_export = all_signals_export[all_signals_export["is_oversight_account"] == True].copy() if not all_signals_export.empty else pd.DataFrame()
-focus_top10_growers = (
-    focus_export[focus_export["signal_type"] == "grower"]
-    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False])
-    .drop_duplicates(subset=["account_id"], keep="first")
-    .head(10)
-    .copy()
-) if not focus_export.empty else pd.DataFrame()
-focus_top10_decliners = (
-    focus_export[focus_export["signal_type"] == "decliner"]
-    .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False])
-    .drop_duplicates(subset=["account_id"], keep="first")
-    .head(10)
-    .copy()
-) if not focus_export.empty else pd.DataFrame()
+if db700.empty:
+    db700_report = pd.DataFrame(
+        columns=[
+            "signal_type",
+            "rank_within_signal",
+            "segment_focus",
+            "account_name",
+            "sales_subregion_level_1",
+            "total_t28d_spend",
+            "pop_growth_pct",
+            "top_ai_sku",
+            "top_ai_sku_delta",
+            "driving_skus",
+        ]
+    )
+else:
+    db700_growers = (
+        db700[db700["signal_type"] == "grower"]
+        .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[False, False])
+        .drop_duplicates(subset=["account_id"], keep="first")
+        .head(10)
+        .copy()
+    )
+    db700_decliners = (
+        db700[db700["signal_type"] == "decliner"]
+        .sort_values(["pop_growth_pct", "total_t28d_spend"], ascending=[True, False])
+        .drop_duplicates(subset=["account_id"], keep="first")
+        .head(10)
+        .copy()
+    )
+    db700_report = pd.concat([db700_growers, db700_decliners], ignore_index=True)
+    if not db700_report.empty:
+        db700_report["rank_within_signal"] = db700_report.groupby("signal_type")["pop_growth_pct"].rank(
+            method="first",
+            ascending=False,
+        )
+        db700_report.loc[db700_report["signal_type"] == "decliner", "rank_within_signal"] = (
+            db700_report[db700_report["signal_type"] == "decliner"]["pop_growth_pct"].rank(
+                method="first",
+                ascending=True,
+            )
+        )
+        db700_report["rank_within_signal"] = db700_report["rank_within_signal"].astype(int)
 
-top10_strategic_grower_ids = set(
-    strategic_top10_growers["account_id"].astype(str).tolist()
-) if not strategic_top10_growers.empty else set()
-strategic_open_uc_top10 = strategic_open_uc[
-    strategic_open_uc["account_id"].astype(str).isin(top10_strategic_grower_ids)
-].copy() if not strategic_open_uc.empty else pd.DataFrame()
+db700_export_cols = [
+    "signal_type",
+    "rank_within_signal",
+    "segment_focus",
+    "account_name",
+    "sales_subregion_level_1",
+    "total_t28d_spend",
+    "pop_growth_pct",
+    "top_ai_sku",
+    "top_ai_sku_delta",
+    "driving_skus",
+]
+db700_export = db700_report[db700_export_cols].copy() if not db700_report.empty else db700_report
 
-vp_md = [
-    f"# Weekly AI Territory Report ({run_date})",
+db700_csv_uri = f"{weekly_dir}/territory_at_a_glance_focus_{run_date}.csv"
+db700_md_uri = f"{weekly_dir}/territory_at_a_glance_focus_{run_date}.md"
+dbutils.fs.put(db700_csv_uri, db700_export.to_csv(index=False), True)
+
+db700_md = [
+    f"# Territory at a Glance - Focus Accounts ({run_date})",
     "",
-    "- Scope: Strategic + Named account signals in DNB, LATAM, CMEG, HLS, FINS, PS, MFG",
-    f"- Noise filter: T28D spend > {MIN_T28D_SPEND}",
-    "- Signal thresholds: Growers >= +10% PoP, Decliners <= -10% PoP",
+    "- Definition: all focus accounts (oversight subset)",
+    "- Signals: top 10 increasers and top 10 decliners by PoP change",
     "",
 ]
-
-append_bu_section(vp_md, "Section 1: Target 50 Accounts - Top 10 Growers", focus_top10_growers, include_segment=True)
-append_bu_section(vp_md, "Section 1: Target 50 Accounts - Top 10 Decliners", focus_top10_decliners, include_segment=True)
-append_bu_section(vp_md, "Section 2: Strategic Accounts - Top 10 Growers", strategic_top10_growers, include_segment=False)
-append_bu_section(vp_md, "Section 2: Strategic Accounts - Top 10 Decliners", strategic_top10_decliners, include_segment=False)
-
-vp_md.append("## Section 3: Open Use Cases for Top 10 Strategic Growers")
-vp_md.append("")
-if strategic_open_uc_top10.empty:
-    vp_md.append("No open AI/GenAI use cases found for this run.")
-    vp_md.append("")
-else:
-    uc_view = strategic_open_uc_top10.copy()
-    uc_view["T28D Spend"] = uc_view["total_t28d_spend"].apply(format_money)
-    uc_view["PoP Growth"] = uc_view["pop_growth_pct"].apply(format_pct)
-    uc_view["Est Monthly DBU $"] = uc_view["estimated_monthly_dollar_dbus"].apply(format_money)
-    uc_cols = [
-        "account_name",
-        "signal_type",
-        "T28D Spend",
-        "PoP Growth",
-        "top_ai_sku",
-        "usecase_name",
-        "stage",
-        "Est Monthly DBU $",
-    ]
-    uc_view = uc_view[uc_cols].rename(
+for signal in ["grower", "decliner"]:
+    sig = db700_export[db700_export["signal_type"] == signal].copy() if not db700_export.empty else pd.DataFrame()
+    db700_md.append(f"## Top 10 {signal.title()}s")
+    db700_md.append("")
+    if sig.empty:
+        db700_md.append("No accounts matched.")
+        db700_md.append("")
+        continue
+    sig = sig.rename(
         columns={
-            "account_name": "Account",
-            "signal_type": "Signal",
-            "top_ai_sku": "Top AI SKU",
-            "usecase_name": "Open Use Case",
-            "stage": "UCO Stage",
+            "segment_focus": "segment",
+            "sales_subregion_level_1": "BU+1",
+            "total_t28d_spend": "t28d_spend",
+            "pop_growth_pct": "pop_change_pct",
+            "top_ai_sku": "main_sku_driver",
+            "top_ai_sku_delta": "sku_delta",
         }
     )
-    vp_md.append(to_markdown_table(uc_view))
-    vp_md.append("")
+    view_cols = [
+        "rank_within_signal",
+        "account_name",
+        "segment",
+        "BU+1",
+        "t28d_spend",
+        "pop_change_pct",
+        "main_sku_driver",
+        "sku_delta",
+    ]
+    db700_md.append(to_markdown_table(sig[view_cols]))
+    db700_md.append("")
 
-vp_report_uri = f"{weekly_dir}/vp_weekly_report_{run_date}.md"
-dbutils.fs.put(vp_report_uri, "\n".join(vp_md).strip() + "\n", True)
-print(f"Wrote VP Weekly Report MD: {vp_report_uri}")
+dbutils.fs.put(db700_md_uri, "\n".join(db700_md).strip() + "\n", True)
+print(f"Wrote Territory-at-a-Glance Focus CSV: {db700_csv_uri}")
+print(f"Wrote Territory-at-a-Glance Focus MD: {db700_md_uri}")
+if db700_export.empty:
+    print("Focus account report is empty for current run filters.")
+else:
+    spark.createDataFrame(db700_export).display()
 
 # COMMAND ----------
 

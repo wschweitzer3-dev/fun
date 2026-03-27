@@ -1,0 +1,43 @@
+command:
+  - "uvicorn"
+  - "bcbs_care_intelligence.backend.main:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: PYTHONPATH
+    value: "src"
+  - name: APP_ENV
+    value: "prod"
+  - name: SUPERVISOR_ENDPOINT_NAME
+    value: "mas-30532bb0-endpoint"
+  - name: SUPERVISOR_NAME
+    value: "HLS_Payer_Supervisor"
+  - name: KNOWLEDGE_ENDPOINT_NAME
+    value: "ka-c7630b94-endpoint"
+  - name: GENIE_SPACE_TITLE
+    value: "HLS Payer Structured Genie"
+  - name: GENIE_SPACE_ID
+    value: "01f126e12bda187fb0fa9f49d1c6e585"
+  - name: WAREHOUSE_ID
+    value: "1e1f63a1a14d1f34"
+  - name: REQUEST_TIMEOUT_S
+    value: "90"
+  - name: SUPERVISOR_CONNECT_TIMEOUT_S
+    value: "10"
+  - name: SUPERVISOR_READ_TIMEOUT_S
+    value: "90"
+  - name: SUPERVISOR_RETRY_COUNT
+    value: "2"
+  - name: SUPERVISOR_RETRY_BACKOFF_S
+    value: "2.0"
+  - name: SUPERVISOR_MAX_OUTPUT_TOKENS
+    value: "900"
+  - name: RESPONSE_CACHE_TTL_S
+    value: "60"
+  - name: SOFT_LATENCY_WARN_MS
+    value: "10000"
+  - name: ENABLE_MOCK_FALLBACK
+    value: "false"
