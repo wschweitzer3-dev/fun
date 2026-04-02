@@ -1,0 +1,153 @@
+[
+  {
+    "question": "Which provider cohorts are most likely to expand Comprehensive case starts in the next quarter?",
+    "expected_route": "structured",
+    "expected_facts": ["cohort", "comprehensive", "next quarter"]
+  },
+  {
+    "question": "Show month-over-month case start growth by territory for the last 12 months.",
+    "expected_route": "structured",
+    "expected_facts": ["month-over-month", "growth", "territory", "12 months"]
+  },
+  {
+    "question": "Compare GP dentists vs orthodontists on conversion rate, revenue per case, and churn risk.",
+    "expected_route": "structured",
+    "expected_facts": ["GP dentists", "orthodontists", "conversion rate", "revenue", "churn risk"]
+  },
+  {
+    "question": "Which 20 providers have the highest upside if we improve consultation-to-start conversion by 5 points?",
+    "expected_route": "structured",
+    "expected_facts": ["top 20", "upside", "conversion", "5 points"]
+  },
+  {
+    "question": "Trend Comprehensive attachment rates versus Lite in the Southeast region.",
+    "expected_route": "structured",
+    "expected_facts": ["trend", "comprehensive", "lite", "southeast"]
+  },
+  {
+    "question": "What are the top reasons providers stall after trialing Comprehensive workflows?",
+    "expected_route": "unstructured",
+    "expected_facts": ["top reasons", "stall", "comprehensive workflows"]
+  },
+  {
+    "question": "Give me a concise objection-handling talk track for providers saying Comprehensive is too complex.",
+    "expected_route": "unstructured",
+    "expected_facts": ["objection handling", "talk track", "too complex"]
+  },
+  {
+    "question": "What barriers are reps hearing around staffing and chair-time constraints?",
+    "expected_route": "unstructured",
+    "expected_facts": ["barriers", "staffing", "chair-time"]
+  },
+  {
+    "question": "Draft an account plan for a hesitant DSO using practical next actions only.",
+    "expected_route": "unstructured",
+    "expected_facts": ["account plan", "hesitant DSO", "next actions"]
+  },
+  {
+    "question": "How should a rep position ROI without over-claiming outcomes?",
+    "expected_route": "unstructured",
+    "expected_facts": ["ROI", "without over-claiming", "positioning"]
+  },
+  {
+    "question": "Identify high-growth providers in the West and explain why they are outperforming peers.",
+    "expected_route": "blended",
+    "expected_facts": ["high-growth", "west", "why outperforming"]
+  },
+  {
+    "question": "Show providers with declining starts and recommend actions to recover momentum.",
+    "expected_route": "blended",
+    "expected_facts": ["declining starts", "recommend actions", "recover"]
+  },
+  {
+    "question": "Which accounts should we prioritize this month, and what is the best outreach sequence for each?",
+    "expected_route": "blended",
+    "expected_facts": ["prioritize", "this month", "outreach sequence"]
+  },
+  {
+    "question": "Compare territories by growth and propose concrete coaching actions for low performers.",
+    "expected_route": "blended",
+    "expected_facts": ["compare territories", "growth", "coaching actions"]
+  },
+  {
+    "question": "Build a top-10 target list and include one specific risk mitigation per account.",
+    "expected_route": "blended",
+    "expected_facts": ["top-10 target", "risk mitigation", "per account"]
+  },
+  {
+    "question": "If the latest quarter data is incomplete, clearly state uncertainty before recommending actions.",
+    "expected_route": "blended",
+    "must_include": ["uncertainty", "recommend"]
+  },
+  {
+    "question": "Tell me what we can and cannot conclude about provider expansion where sample sizes are small.",
+    "expected_route": "unstructured",
+    "must_include": ["can conclude", "cannot conclude", "sample sizes"]
+  },
+  {
+    "question": "Which providers show strong demand signals but low Comprehensive attach rates?",
+    "expected_route": "structured",
+    "expected_facts": ["demand signals", "low attach rates"]
+  },
+  {
+    "question": "Summarize leading indicators that predict next-quarter start growth.",
+    "expected_route": "structured",
+    "expected_facts": ["leading indicators", "next-quarter growth"]
+  },
+  {
+    "question": "Provide a one-page executive brief from this data: key opportunities, risks, and immediate actions.",
+    "expected_route": "blended",
+    "expected_facts": ["opportunities", "risks", "immediate actions"]
+  },
+  {
+    "question": "How should we respond when a provider says patient affordability is the main blocker?",
+    "expected_route": "unstructured",
+    "expected_facts": ["affordability", "main blocker", "respond"]
+  },
+  {
+    "question": "Highlight accounts with highest forecasted growth but elevated churn risk.",
+    "expected_route": "structured",
+    "expected_facts": ["forecasted growth", "churn risk"]
+  },
+  {
+    "question": "Recommend a 30-60-90 day expansion plan for a mid-market ortho group.",
+    "expected_route": "unstructured",
+    "expected_facts": ["30-60-90", "expansion plan", "mid-market ortho"]
+  },
+  {
+    "question": "Compare digital engagement signals against case start outcomes across segments.",
+    "expected_route": "structured",
+    "expected_facts": ["digital engagement", "case starts", "segments"]
+  },
+  {
+    "question": "For accounts with weak conversion but strong demand, suggest tests we should run next month.",
+    "expected_route": "blended",
+    "expected_facts": ["weak conversion", "strong demand", "tests"]
+  },
+  {
+    "question": "What are the top three mistakes reps make when pitching Comprehensive value?",
+    "expected_route": "unstructured",
+    "expected_facts": ["top three mistakes", "pitching", "comprehensive value"]
+  },
+  {
+    "question": "Find accounts where starts are flat despite increased consult volume and explain likely causes.",
+    "expected_route": "blended",
+    "expected_facts": ["starts flat", "consult volume", "likely causes"]
+  },
+  {
+    "question": "Which regions have the strongest momentum and what tactical moves should we copy elsewhere?",
+    "expected_route": "blended",
+    "expected_facts": ["strongest momentum", "tactical moves"]
+  },
+  {
+    "question": "Identify any potential hallucination risk in your own recommendation and call it out explicitly.",
+    "expected_route": "unstructured",
+    "must_include": ["hallucination risk", "explicitly"]
+  },
+  {
+    "question": "Return concise recommendations only; avoid internal orchestration or tool-call descriptions.",
+    "expected_route": "unstructured",
+    "must_not_include": ["tool", "orchestration", "internal routing"]
+  }
+]
+

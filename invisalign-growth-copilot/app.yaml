@@ -1,0 +1,25 @@
+command:
+  - "uvicorn"
+  - "invisalign_growth_copilot.backend.main:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "8000"
+
+env:
+  - name: PYTHONPATH
+    value: "src"
+  - name: APP_NAME
+    value: "Invisalign Growth Copilot"
+  - name: APP_ENV
+    value: "prod"
+  - name: SUPERVISOR_NAME
+    value: "Invisalign_MAS"
+  - name: SUPERVISOR_ENDPOINT_NAME
+    value: "mas-47342197-endpoint"
+  - name: REQUEST_TIMEOUT_S
+    value: "180"
+  - name: MAX_AUTO_APPROVAL_ROUND_TRIPS
+    value: "4"
+  - name: AUTO_APPROVE_MCP_SERVERS
+    value: "will_you"
